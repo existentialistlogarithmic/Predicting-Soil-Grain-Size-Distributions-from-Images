@@ -108,54 +108,86 @@ inside the training cloud. That last row is the shipped default.
 
 ## Where it stands
 
-Local, leave-one-out over 24 samples:
-
-```
-$ python -m soilgsd cv --models constant knn ridge gbt
-constant: 97.25    knn: 37.08    gbt: 42.27    ridge: 43.00
-```
-
-On the actual leaderboard, 2026-09-22:
+Four submissions, 2026-09-22:
 
 | submission | public EMD |
 |---|---|
-| knn, texture, per-domain standardised, k=7 | **85.06** |
+| **knn, texture, k=7, training-referenced scaling** | **68.07** |
+| d50 scalar bottleneck | 85.26 |
+| knn, same but per-domain standardised | 85.06 |
 | constant training-median curve, no images | 90.28 |
 
-The image features do beat a blind baseline, and that is worth something. But
-the size of the win is the story: **cross-camera validation said the model
-should beat the median by about 43 EMD, and on the test set it beat it by
-5.2.** Roughly nine tenths of the measured advantage did not survive the move
-to iPhone photographs.
+The best model is 22 EMD better than predicting the median, and the single
+change that produced most of that was **deleting a domain-adaptation step**.
 
-So the validation built here was necessary and is still not sufficient. The
-Motorola-versus-Samsung experiment is a real test of camera transfer, and it
-is the reason colour features and ridge were rejected, which was right. What
-it cannot see is resampling: both training cameras arrive at almost the same
-scale (×0.87 of the working resolution), while iPhone frames are downsampled
-×0.20-0.29 to reach it. Whatever the model is keying on degrades across that
-gap, and no experiment available inside the training set can measure it.
+### Standardising to the test batch cost 17 EMD
 
-Two further cautions about the leaderboard itself:
+The first model rescaled each batch of features by that batch's own mean and
+standard deviation, on the reasoning that the training and test clouds were
+offset. They are: test samples sat 1.25x the training spread from their
+nearest training neighbours, and the rescaling cut that to 0.83x while
+visibly restoring prediction variety. Every offline diagnostic said it was
+working. It scored 85.06; removing it scored 68.07.
 
-* The public split is 30% of ten samples, so **the public score is computed on
-  three soils**. A 5-point difference is well inside its noise. Tuning against
-  it means fitting three samples, and the final standing uses the other seven.
-* Shrinking predictions toward the median does not help, by two independent
-  arguments. Cross-camera, the score rises monotonically as weight moves off
-  the model (40.7 at full weight, 57.5 at half, 83.2 at zero). And because the
-  metric is an absolute error, the triangle inequality bounds any blend at
-  `w x 85.06 + (1-w) x 90.28`, which is worst at full shrinkage. Whichever
-  predictor is better alone should be used alone.
+The features are already calibrated to millimetres through the camera scale.
+Rescaling them to a batch's own spread throws that calibration away, and the
+calibration was the whole point. The offset between the clouds was the price
+of keeping a physically meaningful axis, not a fault to be corrected.
+
+### Ordering is not calibration
+
+The scalar bottleneck predicts one number, log10(d50), and then pools the
+training curves nearest it. It ranks the ten test soils in exactly the order
+the photographs show - cobbles at Muenster coarsest, coarse gravel at Testfeld
+Lidl next, gravelly sand at Audorfring third, the seven fine sands below them
+(Spearman +1.00 against a visual reading, versus +0.82 for the model that
+scores 68.07). It scored 85.26.
+
+Getting the order right is not the task. Forcing the image through one scalar
+collapsed ten soils onto four distinct curves, and the metric measures the
+area between curves at eleven diameters, not their ranking. A check on
+ordering alone cannot see that, which makes it a weak proxy in the same way
+the cross-camera experiment was.
+
+### Things that were tried and did not help
+
+* **Cropping to the soil.** The soil sits in a tray whose dark rim is visible
+  in most photos, and sampling the rim as soil is clearly wrong. Removing it
+  made cross-camera EMD worse, 40.70 to 44.18, because the rim is visible to
+  different extents on different cameras and cropping to it changes the field
+  of view inconsistently between them. Available as `crop_to_soil`, off.
+* **Matched degradation.** Training photos were downscaled hard by the host
+  and test photos were not, so pushing the test photos through a similar chain
+  should have closed some of the gap. Across intermediate sizes from 1600 to
+  900 px and JPEG quality down to 80, the distance from test to training moved
+  from 1.247 to 1.242. Resampling artefacts are not what separates the two
+  sets.
+* **Shrinking toward the median.** Cross-camera cost rises monotonically as
+  weight leaves the model, and an absolute-error metric bounds any blend at
+  the weighted average of its endpoints. Use the better predictor alone.
+
+### On the leaderboard itself
+
+The public split is 30% of ten samples, so **the public score is three soils**.
+A few points is noise; the 22-point gap to the baseline and the 17-point gap
+between the two scaling choices are not. The final standing uses the other
+seven.
 
 ## What I would try next
 
-* **A camera-aware validation split.** Holding out *Samsung* entirely, rather
-  than leave-one-out, is the closest available proxy for the real split, and
-  nothing should be selected on leave-one-out alone again.
-* **Matched degradation.** Downscale the iPhone photos through the same chain
-  the host used on the training photos before extracting features, instead of
-  correcting for it afterwards.
+* **Stop trusting single-number proxies.** Three different ones have now been
+  wrong in three different ways: leave-one-out flattered ridge by 46, the
+  cross-camera experiment predicted a 43-point win that came in at 5, and a
+  perfect ordering against the photographs scored 17 worse than an imperfect
+  one. Any future selection should look at ordering, calibration and spread
+  together, and should expect to be wrong.
+* **Per-photo scale from the tray.** The tray is a fixed object visible in
+  most photos, so its width in pixels gives a per-photo scale that does not
+  depend on the camera table at all. A first attempt at measuring it implied
+  widths from 19 to 329 mm, which says the detector is too crude rather than
+  that the idea is wrong. This is the most promising untried lever, because it
+  would replace the one input the whole pipeline rests on with something
+  measured per photograph.
 * **The fine end is unreachable.** Clay (0.002 mm) and silt (0.02 mm) sit far
   below 4.55 ppm — about 0.22 mm per pixel. They are currently the worst
   supports by mean absolute error and no texture feature can see them; they

@@ -54,12 +54,54 @@ class FeatureConfig:
     max_side_px: int = 2048
     #: Fallback scale when a photo has no entry in the ppm table.
     default_ppm: float = 4.0
+    #: Crop away the dark tray frame before analysis.  The soil sits in a tray
+    #: whose rim is visible in most photos, so this looks like an obvious win.
+    #: Measured, it is not: cross-camera EMD went from 40.70 to 44.18, because
+    #: the rim is visible to different extents in different cameras and
+    #: cropping to it changes the field of view inconsistently between them.
+    #: Off by default; kept because it is worth retrying alongside a per-photo
+    #: scale estimate taken from the tray itself.
+    crop_to_soil: bool = False
     quantiles: tuple[float, ...] = field(default=(0.05, 0.25, 0.5, 0.75, 0.95))
 
     def level_scales_mm(self) -> np.ndarray:
         """Physical scale, in millimetres, probed by each pyramid level."""
         base = 1.0 / self.target_ppm
         return base * 2.0 ** np.arange(self.n_levels, dtype=np.float64)
+
+
+def _soil_bounds(image: np.ndarray, *, min_fraction: float = 0.15) -> tuple[int, int, int, int] | None:
+    """Bounding box of the bright, low-saturation soil, excluding the tray rim.
+
+    The soil is bright and close to grey or brown; the tray frame is dark and
+    comparatively saturated.  The box is the longest run of rows and of columns
+    that are mostly soil.  A detection covering too little of the frame is
+    treated as a failure, and the caller keeps the whole image.
+    """
+    value = image.max(axis=2)
+    saturation = (image.max(axis=2) - image.min(axis=2)) / (image.max(axis=2) + 1e-6)
+    soil = (value > 0.35) & (saturation < 0.45)
+
+    def longest_run(mask: np.ndarray) -> tuple[int, int]:
+        best = current = 0
+        best_start = start = 0
+        for index, flag in enumerate(mask):
+            if flag:
+                if current == 0:
+                    start = index
+                current += 1
+                if current > best:
+                    best, best_start = current, start
+            else:
+                current = 0
+        return best_start, best_start + best
+
+    left, right = longest_run(soil.mean(axis=0) > 0.5)
+    top, bottom = longest_run(soil.mean(axis=1) > 0.5)
+    height, width = soil.shape
+    if (right - left) < width * min_fraction or (bottom - top) < height * min_fraction:
+        return None
+    return left, top, right, bottom
 
 
 def _load_rgb(path: str | Path) -> np.ndarray:
@@ -194,6 +236,11 @@ def photo_features(
     scale = float(ppm) if ppm and np.isfinite(ppm) and ppm > 0 else config.default_ppm
 
     original = _load_rgb(path)
+    if config.crop_to_soil:
+        bounds = _soil_bounds(original)
+        if bounds is not None:
+            left, top, right, bottom = bounds
+            original = original[top:bottom, left:right]
     image = _rescale_to_target_ppm(original, scale, config)
     achieved_ppm = _effective_ppm(image, original, scale)
 

@@ -5,8 +5,9 @@ data_root: data/raw
 artifacts: artifacts
 
 # Default model for `soilgsd submit`. See `soilgsd describe` for the choices.
-# knn with 5 neighbours on the texture features was the only configuration that
-# held up when the camera changed - see docs/FINDINGS.md.
+# knn with 7 neighbours on the texture features, scored against the training
+# scale rather than the test batch's own. Best on the leaderboard at 68.07;
+# see docs/FINDINGS.md for the three submissions that established that.
 model: knn
 
 # Which features a model may see. "texture" drops colour and meta_* columns,

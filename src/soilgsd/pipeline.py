@@ -62,7 +62,10 @@ def load_settings(path: str | Path | None = None, **overrides) -> Settings:
 
 def _feature_cache_path(settings: Settings, split: str) -> Path:
     config = settings.features
-    tag = f"ppm{config.target_ppm:g}_crop{config.crop_px}x{config.crop_grid}_lv{config.n_levels}"
+    tag = (
+        f"ppm{config.target_ppm:g}_crop{config.crop_px}x{config.crop_grid}"
+        f"_lv{config.n_levels}_soil{int(config.crop_to_soil)}"
+    )
     return settings.artifact_dir / "features" / f"{split}_{tag}.csv"
 
 

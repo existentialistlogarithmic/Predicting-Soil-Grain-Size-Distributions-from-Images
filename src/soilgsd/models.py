@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from .constants import N_SUPPORTS, TARGET_COLUMNS
+from .constants import LOG_SUPPORTS, N_SUPPORTS, TARGET_COLUMNS
 from .curves import median_curve, project_valid
 
 __all__ = [
@@ -26,6 +26,7 @@ __all__ = [
     "RidgeCurve",
     "GradientBoostedCurve",
     "NeighbourCurve",
+    "ScalarBottleneckCurve",
     "BlendCurve",
     "build_model",
     "MODEL_REGISTRY",
@@ -199,21 +200,22 @@ class NeighbourCurve(CurveModel):
     constant baseline as ``k`` grows.
 
     ``per_domain`` standardises a batch of predictions using that batch's own
-    mean and standard deviation rather than the training set's.  Training
-    photos come from Motorola and Samsung phones and were delivered downscaled;
-    test photos are native-resolution iPhone frames.  That leaves the two
-    feature clouds offset from one another, far enough that every test sample's
-    nearest training neighbours are the same handful of points and the model
-    predicts almost the same curve for all ten.  Removing each domain's own
-    offset and gain puts them back on comparable footing: measured on the
-    training cameras it cuts the distance from test to its nearest training
-    neighbours from 1.25x the training spread to 0.83x, and restores prediction
-    variety, at no cost in cross-camera accuracy.
+    mean and standard deviation rather than the training set's.  **It is off by
+    default because it costs 17 EMD on the leaderboard: 85.06 with it, 68.07
+    without.**
 
-    It assumes the batch handed to ``predict`` is a whole domain and is large
-    enough for its statistics to mean something, so batches smaller than
-    ``min_domain_rows`` fall back to the training statistics.  Predicting one
-    row at a time therefore disables it by design.
+    It is kept because the reasoning for it was not silly and the failure is
+    instructive.  The training and test feature clouds really are offset - test
+    samples sat 1.25x the training spread away from their nearest training
+    neighbours, and switching this on cut that to 0.83x and visibly restored
+    prediction variety.  Both of those diagnostics improved.  The score got
+    much worse anyway, because the features are already calibrated to
+    millimetres through the camera scale, and rescaling them to a batch's own
+    spread discards exactly that calibration.  The offset was the price of
+    keeping a physically meaningful axis, not a fault to be corrected.
+
+    When on, it assumes the batch handed to ``predict`` is a whole domain, so
+    batches smaller than ``min_domain_rows`` fall back to training statistics.
     """
 
     name = "knn"
@@ -222,7 +224,7 @@ class NeighbourCurve(CurveModel):
         self,
         n_neighbours: int = 7,
         *,
-        per_domain: bool = True,
+        per_domain: bool = False,
         min_domain_rows: int = 5,
     ) -> None:
         self.n_neighbours = n_neighbours
@@ -295,7 +297,98 @@ class BlendCurve(CurveModel):
         return project_valid((stacked * weights).sum(axis=0))
 
 
+def _log_d50(curves: np.ndarray, percentile: float = 50.0) -> np.ndarray:
+    """log10 of the diameter at which each curve passes ``percentile``."""
+    out = np.empty(len(curves))
+    for row, curve in enumerate(curves):
+        rising = np.maximum.accumulate(curve)
+        out[row] = (
+            LOG_SUPPORTS[0]
+            if rising[0] >= percentile
+            else float(np.interp(percentile, rising, LOG_SUPPORTS))
+        )
+    return out
+
+
+class ScalarBottleneckCurve(CurveModel):
+    """Predict one number - the median grain diameter - then look up a curve.
+
+    Twenty-two texture features over twenty-four training samples is a lot of
+    freedom, and it showed: the neighbour model's test predictions sat outside
+    the training feature cloud and barely varied.  Forcing the image through a
+    single scalar removes almost all of that freedom.  Grain size is what the
+    photograph actually measures, the strongest individual feature correlates
+    with log10(d50) at r = 0.86, and a one-dimensional space is far harder to
+    land outside of than a twenty-two dimensional one.
+
+    The curve comes from pooling the training soils whose d50 is closest to the
+    prediction, which keeps real curve shapes rather than assuming a lognormal.
+
+    Features are standardised against the **training** distribution, not within
+    the batch being predicted.  Normalising within the batch looks like sensible
+    domain adaptation and is not: the features are already calibrated to
+    millimetres via the camera scale, so rescaling them to the batch's own
+    spread throws that calibration away.  Doing exactly that to the neighbour
+    model cost 17 EMD on the leaderboard (85.06 with it, 68.07 without), so
+    this model does not repeat it.
+
+    Feature selection happens inside ``fit``, on the training fold only, so
+    cross-validation stays honest.
+    """
+
+    name = "d50"
+
+    def __init__(self, n_features: int = 5, n_neighbours: int = 7) -> None:
+        self.n_features = n_features
+        self.n_neighbours = n_neighbours
+        self.scaler_ = _Standardiser()
+        self.selected_: np.ndarray | None = None
+        self.coefficients_: np.ndarray | None = None
+        self.train_d50_: np.ndarray | None = None
+        self.train_curves_: np.ndarray | None = None
+
+    def fit(self, features, targets) -> "ScalarBottleneckCurve":
+        raw = _as_matrix(features)
+        matrix = self.scaler_.fit(raw).transform(raw)
+        curves = _as_targets(targets)
+        target_d50 = _log_d50(curves)
+
+        spread = matrix.std(axis=0)
+        correlation = np.zeros(matrix.shape[1])
+        usable = spread > 1e-12
+        if usable.any():
+            centred = matrix[:, usable] - matrix[:, usable].mean(axis=0)
+            centred_target = target_d50 - target_d50.mean()
+            denominator = np.sqrt((centred**2).sum(axis=0) * (centred_target**2).sum())
+            correlation[usable] = np.abs(centred.T @ centred_target) / np.maximum(denominator, 1e-12)
+
+        count = int(min(self.n_features, matrix.shape[1]))
+        self.selected_ = np.argsort(correlation)[::-1][:count]
+        design = np.column_stack([matrix[:, self.selected_], np.ones(len(matrix))])
+        self.coefficients_ = np.linalg.lstsq(design, target_d50, rcond=None)[0]
+        self.train_d50_ = target_d50
+        self.train_curves_ = curves
+        return self
+
+    def predict(self, features) -> np.ndarray:
+        if self.coefficients_ is None or self.train_curves_ is None:
+            raise RuntimeError("call fit before predict")
+        matrix = self.scaler_.transform(_as_matrix(features))
+        design = np.column_stack([matrix[:, self.selected_], np.ones(len(matrix))])
+        predicted = design @ self.coefficients_
+        # Never claim a grain size the training set gives no evidence for.
+        predicted = np.clip(predicted, self.train_d50_.min(), self.train_d50_.max())
+
+        k = int(min(self.n_neighbours, len(self.train_curves_)))
+        pooled = np.empty((len(predicted), N_SUPPORTS))
+        for row, value in enumerate(predicted):
+            nearest = np.argsort(np.abs(self.train_d50_ - value))[:k]
+            pooled[row] = np.median(self.train_curves_[nearest], axis=0)
+        return project_valid(pooled)
+
+
 MODEL_REGISTRY: dict[str, type[CurveModel]] = {
+    ScalarBottleneckCurve.name: ScalarBottleneckCurve,
     ConstantCurve.name: ConstantCurve,
     RidgeCurve.name: RidgeCurve,
     GradientBoostedCurve.name: GradientBoostedCurve,
