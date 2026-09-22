@@ -28,13 +28,28 @@ score estimate.
 
 ## Getting the real data
 
-The photos are under competition terms, so you need a Kaggle account:
+The photos are under competition terms, so you need a Kaggle account.
 
-1. Accept the rules on the
-   [competition page](https://www.kaggle.com/competitions/soil-grain-size-from-photos/rules).
-2. Create an API token (Kaggle → Settings → API → *Create New Token*) and save
-   it to `~/.kaggle/kaggle.json`.
-3. `make download` — or `./scripts/download_data.sh` — which unpacks into `data/raw/`.
+**1. Accept the rules** on the
+[competition page](https://www.kaggle.com/competitions/soil-grain-size-from-photos/rules).
+Downloads return 403 until you do, however valid your credentials are.
+
+**2. Authenticate**, either way:
+
+```bash
+# A. environment variables - best for CI and remote containers
+export KAGGLE_USERNAME=your-kaggle-username
+export KAGGLE_KEY=your-api-key
+
+# B. a token file (Kaggle -> Settings -> API -> Create New Token)
+mkdir -p ~/.kaggle && mv ~/Downloads/kaggle.json ~/.kaggle/ && chmod 600 ~/.kaggle/kaggle.json
+```
+
+Both the key and the token file are secrets. `kaggle.json` is gitignored; never
+paste either into a chat, a commit, or an issue.
+
+**3. Download**: `make download`, or `./scripts/download_data.sh`, which unpacks
+into `data/raw/`.
 
 Then:
 

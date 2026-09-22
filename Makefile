@@ -18,13 +18,7 @@ setup:
 	$(PYTHON) -m pip install -e ".[dev]"
 
 download:
-	@test -f "$$HOME/.kaggle/kaggle.json" || \
-	  (echo "No ~/.kaggle/kaggle.json - see README, 'Getting the data'"; exit 1)
-	$(PYTHON) -m pip install --quiet kaggle
-	mkdir -p $(DATA)
-	kaggle competitions download -c $(COMP) -p $(DATA)
-	cd $(DATA) && unzip -o -q $(COMP).zip && rm -f $(COMP).zip
-	@echo "data ready in $(DATA)"
+	./scripts/download_data.sh $(DATA)
 
 synthetic:
 	$(PYTHON) -m soilgsd make-synthetic --out data/synthetic
