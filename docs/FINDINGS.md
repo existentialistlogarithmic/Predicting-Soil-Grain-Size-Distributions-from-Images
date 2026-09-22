@@ -108,16 +108,45 @@ inside the training cloud. That last row is the shipped default.
 
 ## Where it stands
 
+Local, leave-one-out over 24 samples:
+
 ```
 $ python -m soilgsd cv --models constant knn ridge gbt
 constant: 97.25    knn: 37.08    gbt: 42.27    ridge: 43.00
 ```
 
-Leave-one-out over 24 samples, so a single hard soil moves it by several
-points — fold standard deviation is ~30. Treat the ordering as meaningful and
-the exact value as noisy. The cross-camera number (40.5) is the more honest
-estimate of leaderboard behaviour, and even that cannot see the iPhone
-resampling.
+On the actual leaderboard, 2026-09-22:
+
+| submission | public EMD |
+|---|---|
+| knn, texture, per-domain standardised, k=7 | **85.06** |
+| constant training-median curve, no images | 90.28 |
+
+The image features do beat a blind baseline, and that is worth something. But
+the size of the win is the story: **cross-camera validation said the model
+should beat the median by about 43 EMD, and on the test set it beat it by
+5.2.** Roughly nine tenths of the measured advantage did not survive the move
+to iPhone photographs.
+
+So the validation built here was necessary and is still not sufficient. The
+Motorola-versus-Samsung experiment is a real test of camera transfer, and it
+is the reason colour features and ridge were rejected, which was right. What
+it cannot see is resampling: both training cameras arrive at almost the same
+scale (×0.87 of the working resolution), while iPhone frames are downsampled
+×0.20-0.29 to reach it. Whatever the model is keying on degrades across that
+gap, and no experiment available inside the training set can measure it.
+
+Two further cautions about the leaderboard itself:
+
+* The public split is 30% of ten samples, so **the public score is computed on
+  three soils**. A 5-point difference is well inside its noise. Tuning against
+  it means fitting three samples, and the final standing uses the other seven.
+* Shrinking predictions toward the median does not help, by two independent
+  arguments. Cross-camera, the score rises monotonically as weight moves off
+  the model (40.7 at full weight, 57.5 at half, 83.2 at zero). And because the
+  metric is an absolute error, the triangle inequality bounds any blend at
+  `w x 85.06 + (1-w) x 90.28`, which is worst at full shrinkage. Whichever
+  predictor is better alone should be used alone.
 
 ## What I would try next
 
