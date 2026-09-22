@@ -1,0 +1,28 @@
+# Competition data and anything derived from it stays out of git.
+data/
+artifacts/
+*.csv.gz
+
+# Kaggle credentials must never be committed.
+kaggle.json
+.kaggle/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+.ipynb_checkpoints/

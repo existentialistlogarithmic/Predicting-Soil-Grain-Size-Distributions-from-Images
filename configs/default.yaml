@@ -1,0 +1,28 @@
+# Settings for the soilgsd pipeline. Override any field on the command line.
+
+# Folder holding the official competition files (see README: make download).
+data_root: data/raw
+artifacts: artifacts
+
+# Default model for `soilgsd submit`. See `soilgsd describe` for the choices.
+model: gbt
+
+# Grouped cross-validation. Each sample is its own group unless group_pattern
+# is set to a regex whose first capturing group names the physical soil, e.g.
+# '^([A-Za-z]+[0-9]+)' to collapse SOIL07_rep1 and SOIL07_rep2 into one group.
+n_splits: 5
+group_pattern: null
+
+features:
+  # Every photo is resampled to this many pixels per millimetre before analysis,
+  # so one pixel means the same physical length whichever camera took the shot.
+  target_ppm: 4.0
+  # Analysis window: 256 px at 4 px/mm is a 64 mm square of ground.
+  crop_px: 256
+  crop_grid: 3
+  # Pyramid levels; level l probes a physical scale of (1 / target_ppm) * 2**l mm,
+  # so 7 levels span 0.25 mm to 16 mm.
+  n_levels: 7
+  max_side_px: 2048
+  # Used when a photo has no row in ppm_updated.csv.
+  default_ppm: 4.0

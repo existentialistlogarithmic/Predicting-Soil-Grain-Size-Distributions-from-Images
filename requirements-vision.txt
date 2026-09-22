@@ -1,0 +1,5 @@
+# Optional, for the deep-learning track. Install the CPU wheels unless you have
+# a GPU:  pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+-r requirements.txt
+torch>=2.1
+torchvision>=0.16
