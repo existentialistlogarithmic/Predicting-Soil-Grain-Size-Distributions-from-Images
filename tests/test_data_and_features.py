@@ -43,8 +43,9 @@ def test_sample_submission_gives_the_test_ids(synthetic_root):
 def test_ppm_table_is_normalised(synthetic_root):
     paths = DataPaths.discover(synthetic_root)
     ppm = load_ppm(paths.ppm)
-    assert set(ppm.columns) == {"key", "ppm", "key_stem"}
+    assert set(ppm.columns) == {"camera_key", "label", "ppm", "reference_long_side"}
     assert (ppm["ppm"] > 0).all()
+    assert (ppm["reference_long_side"] > 0).all()
 
 
 def test_photo_index_maps_photos_onto_samples(synthetic_root):
@@ -55,6 +56,7 @@ def test_photo_index_maps_photos_onto_samples(synthetic_root):
     assert set(index[ID_COLUMN]) == set(labels[ID_COLUMN])
     assert index["ppm"].notna().all()
     assert index.attrs["unmatched"] == []
+    assert index.attrs["no_camera"] == []
 
 
 def test_longest_sample_id_wins_the_match(tmp_path):

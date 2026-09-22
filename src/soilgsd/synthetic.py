@@ -86,33 +86,48 @@ def generate_dataset(
 
     rng = np.random.default_rng(seed)
     supports = np.asarray(SUPPORTS_MM, dtype=np.float64)
-    # Two camera scales, so the ppm correction has something to actually fix.
-    cameras = {"camA": 6.0, "camB": 2.5}
 
-    def build(prefix: str, count: int, directory: Path) -> tuple[list[str], list[np.ndarray], list[dict]]:
+    # Mirror the real archive's two hazards: training and test are shot by
+    # different phones, and some cameras' photos are delivered downscaled from
+    # the resolution ppm_updated.csv quotes them at.  A pipeline that ignores
+    # either one looks fine here and fails on the leaderboard.
+    # name: (true pixels per mm the image is rendered at, delivered fraction of
+    # the resolution ppm_updated.csv quotes).  The quoted ppm and the reference
+    # resolution are derived from these, so a pipeline that applies the
+    # resolution correction recovers the true scale and a naive one does not.
+    cameras = {
+        "Motorola_Edge": (4.60, 0.40),
+        "Samsung_A52": (4.55, 0.173),
+        "iPhone14": (13.94, 1.00),
+        "iPhone16": (19.53, 1.00),
+    }
+    train_cameras = ["Motorola_Edge", "Samsung_A52"]
+    test_cameras = ["iPhone14", "iPhone16"]
+
+    def build(
+        prefix: str, count: int, directory: Path, camera_names: list[str]
+    ) -> tuple[list[str], list[np.ndarray]]:
         ids: list[str] = []
         curves: list[np.ndarray] = []
-        ppm_rows: list[dict] = []
         for index in range(count):
             sample_id = f"{prefix}{index:03d}"
             median_mm = float(10.0 ** rng.uniform(-1.3, 1.3))
             sigma = float(rng.uniform(0.35, 0.95))
             tint = np.clip(rng.normal(loc=[0.78, 0.70, 0.60], scale=0.09), 0.25, 1.0)
             for photo in range(photos_per_sample):
-                camera = list(cameras)[(index + photo) % len(cameras)]
-                ppm = cameras[camera]
-                image = _render_soil(rng, median_mm, sigma, ppm, size_px, tint)
-                photo_id = f"{sample_id}_p{photo}"
+                camera = camera_names[(index + photo) % len(camera_names)]
+                true_ppm, _ = cameras[camera]
+                image = _render_soil(rng, median_mm, sigma, true_ppm, size_px, tint)
+                name = f"{camera}_{sample_id}_{photo + 1:02d}.jpg"
                 Image.fromarray((image * 255).astype(np.uint8)).save(
-                    directory / f"{photo_id}.jpg", quality=92
+                    directory / name, quality=92
                 )
-                ppm_rows.append({"photo": f"{photo_id}.jpg", "camera": camera, "ppm": ppm})
             ids.append(sample_id)
             curves.append(_lognormal_cdf(supports, median_mm, sigma))
-        return ids, curves, ppm_rows
+        return ids, curves
 
-    train_ids, train_curves, train_ppm = build("TRAIN", n_train, train_dir)
-    test_ids, _, test_ppm = build("TEST", n_test, test_dir)
+    train_ids, train_curves = build("TRAIN", n_train, train_dir, train_cameras)
+    test_ids, _ = build("TEST", n_test, test_dir, test_cameras)
 
     labels = pd.DataFrame(np.vstack(train_curves), columns=list(TARGET_COLUMNS))
     labels[list(TARGET_COLUMNS)] = labels[list(TARGET_COLUMNS)].round(3)
@@ -127,5 +142,17 @@ def generate_dataset(
     template.insert(0, ID_COLUMN, test_ids)
     template.loc[:, list(SUBMISSION_COLUMNS)].to_csv(root / "sample_submission.csv", index=False)
 
-    pd.DataFrame(train_ppm + test_ppm).to_csv(root / "ppm_updated.csv", index=False)
+    # ppm is quoted per camera at a reference resolution, exactly as the host ships it.
+    pd.DataFrame(
+        [
+            {
+                "phone": name.replace("_", " "),
+                "camera": name.replace("_", " ").lower(),
+                "width": int(round(size_px / delivered)),
+                "height": int(round(size_px / delivered * 9 / 16)),
+                "ppm": round(true_ppm / delivered, 3),
+            }
+            for name, (true_ppm, delivered) in cameras.items()
+        ]
+    ).to_csv(root / "ppm_updated.csv", index=False)
     return root

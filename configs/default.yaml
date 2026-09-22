@@ -5,12 +5,18 @@ data_root: data/raw
 artifacts: artifacts
 
 # Default model for `soilgsd submit`. See `soilgsd describe` for the choices.
-model: gbt
+# knn with 5 neighbours on the texture features was the only configuration that
+# held up when the camera changed - see docs/FINDINGS.md.
+model: knn
 
-# Grouped cross-validation. Each sample is its own group unless group_pattern
-# is set to a regex whose first capturing group names the physical soil, e.g.
-# '^([A-Za-z]+[0-9]+)' to collapse SOIL07_rep1 and SOIL07_rep2 into one group.
-n_splits: 5
+# Which features a model may see. "texture" drops colour and meta_* columns,
+# which encode the camera rather than the soil and do not transfer from the
+# Motorola/Samsung training photos to the iPhone test photos.
+feature_set: texture
+
+# Grouped cross-validation. With only 24 training samples, 24 splits means
+# leave-one-out, which is the most data each fold can get.
+n_splits: 24
 group_pattern: null
 
 features:

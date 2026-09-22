@@ -10,6 +10,11 @@ Scored by mean **log-diameter-weighted Earth Mover's Distance**, range
 `[0, 500]`, lower is better. Deadline **2026-11-30 11:00 UTC**, five
 submissions per day. Full reference in [`docs/COMPETITION.md`](docs/COMPETITION.md).
 
+**24 training samples, 10 test samples, and no camera shared between them.**
+That shapes every decision here — see [`docs/FINDINGS.md`](docs/FINDINGS.md)
+for the measurements, including two silent traps in the archive that cost
+more than any model choice.
+
 ## Quick start
 
 ```bash
@@ -119,26 +124,27 @@ and `GroupKFold` splits on a soil key — set `group_pattern` in
 | Name | What it does |
 |------|--------------|
 | `constant` | the training median curve; the number every image model must beat |
-| `ridge` | ridge onto the ten free supports, `alpha` chosen by leave-one-out GCV inside `fit` |
-| `knn` | median of the `k` nearest training curves — cannot produce an unphysical curve |
-| `gbt` | one absolute-error gradient-boosting regressor per free support (default) |
+| `knn` | median of the `k` nearest training curves, per-domain standardised (default) |
+| `ridge` | ridge onto the ten free supports, `alpha` by leave-one-out GCV inside `fit` |
+| `gbt` | one absolute-error gradient-boosting regressor per free support |
 | `blend:a+b` | convex blend of any of the above |
 
-On the synthetic rig, the constant baseline scores 70.0 and the image models
-land between 20 and 25:
+Leave-one-out over the 24 training samples:
 
 ```
-$ python -m soilgsd make-synthetic --out data/synthetic --n-train 40 --n-test 12
-$ python -m soilgsd cv --data-root data/synthetic --models constant ridge knn gbt
-constant: OOF weighted EMD = 70.0224 (fold sd 20.617)
-ridge:    OOF weighted EMD = 20.2745 (fold sd  4.896)
-knn:      OOF weighted EMD = 24.9914 (fold sd  4.121)
-gbt:      OOF weighted EMD = 24.2981 (fold sd  5.142)
+$ python -m soilgsd cv --models constant knn ridge gbt
+constant: OOF weighted EMD = 97.2483
+knn:      OOF weighted EMD = 37.0786   <- default
+gbt:      OOF weighted EMD = 42.2681
+ridge:    OOF weighted EMD = 42.9972
 ```
 
-Those numbers describe the rig, not the leaderboard. `gbt` trails `ridge` here
-only because forty samples is far too few for it; expect that to reverse on the
-real data.
+Fold standard deviation is around 30 on 24 samples, so read the ordering, not
+the decimals. **The leave-one-out number is not the one to trust**: held out by
+*camera* rather than by sample, ridge scores 89.8–99.7 — worse than predicting
+the median curve — while leave-one-out flattered it at 43.0. `knn` is the
+default because it is the only model whose accuracy survived a change of
+camera.
 
 ## Layout
 
@@ -162,18 +168,19 @@ configs/         pipeline settings
 
 ## Where the score is likely to come from
 
-* **The fine end is the hard part.** Clay at 0.002 mm and silt at 0.02 mm are
-  orders of magnitude below what a photograph resolves. No texture feature can
-  see them; they have to come from colour, gloss and the coarse fraction.
-  `soilgsd cv` prints the worst supports by MAE so you can watch this directly.
-* **Scale errors are fatal.** A photo whose `ppm` is wrong or missing shifts its
-  whole texture profile by however many octaves the error is worth. Check the
-  `[warn]` lines the pipeline prints about unmatched photos.
-* **A pretrained CNN is the obvious next step** — fine-tune a small backbone on
-  physically-rescaled crops with an L1 loss on the curve, predicting bin masses
-  through a softmax so monotonicity is free. `requirements-vision.txt` is there
-  for it. Check the Rules tab on pretrained weights first; that permission is
-  listed as unverified in `docs/COMPETITION.md`.
+* **Nothing may encode the camera.** Training photos are Motorola and Samsung;
+  every test photo is an iPhone. Colour statistics encode white balance and
+  exposure, and `meta_*` records pixels per millimetre outright — on the test
+  set it takes values (13.9–19.5) far outside anything in training (~4.55).
+  The default `texture` feature set drops both.
+* **The fine end is unreachable.** Clay at 0.002 mm and silt at 0.02 mm sit far
+  below the 4.55 ppm ceiling the training photos impose — roughly 0.22 mm per
+  pixel. They are the worst supports by mean absolute error, and the only
+  features that could see them are the colour features that do not transfer.
+  This is the structural ceiling on the score.
+* **Validate by camera, not by sample.** Leave-one-out cannot see the shift
+  that decides the leaderboard. Holding out Samsung entirely is the closest
+  available proxy.
 
 ## Tests
 

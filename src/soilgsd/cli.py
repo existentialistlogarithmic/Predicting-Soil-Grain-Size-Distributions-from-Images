@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from .constants import LOG_WIDTHS, MAX_SCORE, SUPPORTS_MM
+from .features import FEATURE_SETS
 from .models import MODEL_REGISTRY
 from .pipeline import load_settings, make_submission, prepare_features, run_cv
 from .validate import validate_submission_file
@@ -21,6 +22,7 @@ def _settings(args: argparse.Namespace):
         data_root=getattr(args, "data_root", None),
         artifacts=getattr(args, "artifacts", None),
         model=getattr(args, "model", None),
+        feature_set=getattr(args, "feature_set", None),
         n_splits=getattr(args, "n_splits", None),
     )
 
@@ -90,6 +92,11 @@ def build_parser() -> argparse.ArgumentParser:
         sub.add_argument("--data-root", help="folder holding the official competition files")
         sub.add_argument("--artifacts", help="folder for caches, reports and submissions")
         sub.add_argument("--refresh", action="store_true", help="ignore the feature cache")
+        sub.add_argument(
+            "--feature-set",
+            choices=list(FEATURE_SETS),
+            help="which features a model may see (default: texture, the camera-robust set)",
+        )
 
     describe = subparsers.add_parser("describe", help="print the competition's fixed facts")
     describe.set_defaults(func=_cmd_describe)

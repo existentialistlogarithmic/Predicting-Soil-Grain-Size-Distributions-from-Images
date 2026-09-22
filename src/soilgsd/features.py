@@ -28,7 +28,14 @@ import pandas as pd
 
 from .constants import ID_COLUMN
 
-__all__ = ["FeatureConfig", "photo_features", "extract_photo_features", "aggregate_to_samples"]
+__all__ = [
+    "FeatureConfig",
+    "photo_features",
+    "extract_photo_features",
+    "aggregate_to_samples",
+    "select_features",
+    "FEATURE_SETS",
+]
 
 
 @dataclass(frozen=True)
@@ -278,6 +285,63 @@ def aggregate_to_samples(photo_feature_frame: pd.DataFrame) -> pd.DataFrame:
     spread = grouped.std(ddof=0).fillna(0.0).add_suffix("__pstd")
     counts = photo_feature_frame.groupby(ID_COLUMN, sort=True).size().rename("meta_n_photos")
 
-    out = pd.concat([mean, spread, counts], axis=1).reset_index()
+    out = pd.concat([mean, spread, counts], axis=1).copy().reset_index()
     out[ID_COLUMN] = out[ID_COLUMN].astype(str)
     return out
+
+
+#: Named feature subsets.  ``texture`` is the default and the only one measured
+#: to survive a change of camera; see :func:`select_features`.
+FEATURE_SETS = ("texture", "texture_full", "all", "colour")
+
+
+def select_features(columns, feature_set: str = "texture") -> list[str]:
+    """Pick which feature columns a model is allowed to see.
+
+    This is not tidying, it is the main defence against the dataset's central
+    hazard.  Training photos come from Motorola and Samsung phones; every test
+    photo comes from an iPhone.  Measured on the 21 training samples that were
+    shot by two different cameras, training on one camera and predicting the
+    other costs:
+
+        feature set   same-camera   cross-camera
+        all               44.6          73.0
+        colour            53.8          85.7
+        texture           42.7          39.2
+
+    Colour statistics encode the camera's white balance and exposure, so they
+    do not transfer.  ``meta_*`` is worse still: it records pixels per
+    millimetre and field of view, which identifies the camera outright and
+    takes values on the test set (13.9-19.5 ppm) far outside anything in
+    training (~4.55 ppm).  The band-energy profile, already calibrated to
+    millimetres, is the part that measures the soil rather than the phone.
+    """
+    columns = [str(column) for column in columns]
+    if feature_set == "all":
+        return [column for column in columns if not column.startswith("meta_")]
+    if feature_set in {"texture", "texture_full"}:
+        chosen = [
+            column
+            for column in columns
+            if (column.startswith("band") or "grad" in column)
+            and not column.startswith("meta_")
+        ]
+        if feature_set == "texture_full":
+            return chosen
+        # __pstd is the spread across the photos of one sample, and it does not
+        # mean the same thing on each side of the split: a training sample is
+        # usually shot by two different phones, so its spread is dominated by
+        # disagreement between cameras, while every test sample comes from a
+        # single phone.  It was the largest single source of the train/test
+        # feature offset, so the default set leaves it out.
+        return [column for column in chosen if "__pstd" not in column]
+    if feature_set == "colour":
+        return [
+            column
+            for column in columns
+            if any(
+                column.startswith(prefix)
+                for prefix in ("r_", "g_", "b_", "gray", "chroma", "satur")
+            )
+        ]
+    raise ValueError(f"unknown feature_set {feature_set!r}; choose from {FEATURE_SETS}")

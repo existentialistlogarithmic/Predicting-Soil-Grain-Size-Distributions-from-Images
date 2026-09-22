@@ -13,7 +13,12 @@ from .constants import ID_COLUMN, SUBMISSION_COLUMNS, TARGET_COLUMNS
 from .curves import project_valid
 from .data import DataPaths, build_photo_index, load_labels, load_ppm, load_sample_submission
 from .evaluate import CVResult, cross_validate
-from .features import FeatureConfig, aggregate_to_samples, extract_photo_features
+from .features import (
+    FeatureConfig,
+    aggregate_to_samples,
+    extract_photo_features,
+    select_features,
+)
 from .models import build_model
 from .validate import validate_submission
 
@@ -24,8 +29,9 @@ __all__ = ["Settings", "load_settings", "prepare_features", "run_cv", "make_subm
 class Settings:
     data_root: str = "data/raw"
     artifacts: str = "artifacts"
-    model: str = "gbt"
-    n_splits: int = 5
+    model: str = "knn"
+    feature_set: str = "texture"
+    n_splits: int = 24
     group_pattern: str | None = None
     features: FeatureConfig = None  # type: ignore[assignment]
 
@@ -126,7 +132,7 @@ def run_cv(settings: Settings, *, model: str | None = None, refresh: bool = Fals
 
     result = cross_validate(
         lambda: build_model(name),
-        features,
+        features[[ID_COLUMN, *select_features(features.columns, settings.feature_set)]],
         labels,
         n_splits=settings.n_splits,
         group_pattern=settings.group_pattern,
@@ -142,7 +148,8 @@ def run_cv(settings: Settings, *, model: str | None = None, refresh: bool = Fals
         "score": result.score,
         "fold_scores": result.fold_scores,
         "n_samples": int(len(result.per_sample)),
-        "n_features": int(sum(1 for c in features.columns if c != ID_COLUMN)),
+        "feature_set": settings.feature_set,
+        "n_features": len(select_features(features.columns, settings.feature_set)),
         "per_support_mae": {k: float(v) for k, v in result.per_support_mae.items()},
         "features": asdict(settings.features),
     }
@@ -172,11 +179,7 @@ def make_submission(
     test_features = prepare_features(settings, split="test", refresh=refresh)
 
     merged = labels.merge(train_features, on=ID_COLUMN, how="inner", validate="one_to_one")
-    feature_columns = [
-        column
-        for column in train_features.columns
-        if column != ID_COLUMN and pd.api.types.is_numeric_dtype(train_features[column])
-    ]
+    feature_columns = select_features(train_features.columns, settings.feature_set)
     fitted = build_model(name).fit(merged[feature_columns], merged[list(TARGET_COLUMNS)])
 
     # Reindex onto the template so every required id is present and in order;

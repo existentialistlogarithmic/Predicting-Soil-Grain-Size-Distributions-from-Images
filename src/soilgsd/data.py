@@ -27,6 +27,8 @@ from .constants import ID_COLUMN, SUBMISSION_COLUMNS, TARGET_COLUMNS
 
 __all__ = [
     "DataPaths",
+    "normalise_key",
+    "resolve_camera",
     "load_labels",
     "load_sample_submission",
     "load_ppm",
@@ -131,71 +133,139 @@ def load_sample_submission(path: str | Path) -> pd.DataFrame:
     return _coerce_targets(frame, source=path).reset_index(drop=True)
 
 
-def load_ppm(path: str | Path) -> pd.DataFrame:
-    """Load the camera-scale table as ``key`` / ``ppm``.
+def normalise_key(value: str) -> str:
+    """Fold a filename or identifier down to comparable alphanumerics.
 
-    The host ships pixels-per-millimetre keyed by photo or by camera.  The
-    column names are not fixed, so the first column that looks like a scale is
-    taken as ``ppm`` and the first string-like column as the join ``key``.
+    The archive is inconsistent in ways that matter for joining: ``iPhone16``
+    and ``iPhone_16`` are one camera, and one test sample reaches us as
+    ``HPC_M#U00fcnster_BS6_9,0-10m`` while ``sample_submission.csv`` spells it
+    ``HPC_Muenster_BS6_9_0-10m``.  Decoding the ``#U00xx`` escape, expanding
+    German umlauts the way the host does, and dropping punctuation makes both
+    spellings land on the same key.
+    """
+    text = re.sub(
+        r"#U([0-9a-fA-F]{4})",
+        lambda match: chr(int(match.group(1), 16)),
+        str(value),
+    )
+    for source, target in (
+        ("ä", "ae"), ("ö", "oe"), ("ü", "ue"),
+        ("Ä", "ae"), ("Ö", "oe"), ("Ü", "ue"),
+        ("ß", "ss"),
+    ):
+        text = text.replace(source, target)
+    return re.sub(r"[^0-9a-z]+", "", text.lower())
+
+
+def load_ppm(path: str | Path) -> pd.DataFrame:
+    """Load the camera scale table.
+
+    ``ppm_updated.csv`` gives pixels per millimetre *for a stated reference
+    resolution*, keyed by phone and camera model rather than by photograph.
+    Both facts matter: the scale has to be matched to a photo via its camera
+    name, and then corrected for the resolution the file was actually
+    delivered at (see :func:`build_photo_index`).
     """
     path = Path(path)
     frame = pd.read_csv(path)
     frame.columns = [str(column).strip() for column in frame.columns]
 
-    ppm_column = next(
-        (
-            column
-            for column in frame.columns
-            if re.search(r"ppm|pixels?[_ ]?per[_ ]?mm|scale|resolution", column, re.I)
-        ),
-        None,
-    )
+    def pick(pattern: str, exclude: set[str] | None = None) -> str | None:
+        for column in frame.columns:
+            if column in (exclude or set()):
+                continue
+            if re.search(pattern, column, re.I):
+                return column
+        return None
+
+    ppm_column = pick(r"^ppm$|pixels?[_ ]?per[_ ]?mm|scale")
     if ppm_column is None:
         numeric = [c for c in frame.columns if pd.api.types.is_numeric_dtype(frame[c])]
         if not numeric:
             raise ValueError(f"{path} has no numeric column to use as ppm")
         ppm_column = numeric[-1]
+    width_column = pick(r"width")
+    height_column = pick(r"height")
 
-    key_column = next(
-        (
-            column
-            for column in frame.columns
-            if column != ppm_column
-            and re.search(r"photo|image|file|name|camera|id", column, re.I)
-        ),
-        None,
-    )
-    if key_column is None:
-        key_column = next((c for c in frame.columns if c != ppm_column), None)
-    if key_column is None:
-        raise ValueError(f"{path} has no key column to join on")
+    records: list[dict[str, object]] = []
+    name_columns = [
+        column
+        for column in frame.columns
+        if column not in {ppm_column, width_column, height_column}
+        and not pd.api.types.is_numeric_dtype(frame[column])
+    ]
+    for _, row in frame.iterrows():
+        scale = pd.to_numeric(row[ppm_column], errors="coerce")
+        if not np.isfinite(scale):
+            continue
+        reference = np.nan
+        if width_column and height_column:
+            width = pd.to_numeric(row[width_column], errors="coerce")
+            height = pd.to_numeric(row[height_column], errors="coerce")
+            if np.isfinite(width) and np.isfinite(height):
+                reference = float(max(width, height))
+        # One camera can be spelled several ways across the columns; index every
+        # spelling so a filename can match on whichever one it happens to use.
+        for column in name_columns:
+            key = normalise_key(row[column])
+            if key:
+                records.append(
+                    {
+                        "camera_key": key,
+                        "label": str(row[column]).strip(),
+                        "ppm": float(scale),
+                        "reference_long_side": reference,
+                    }
+                )
 
-    out = pd.DataFrame(
-        {
-            "key": frame[key_column].astype(str).str.strip(),
-            "ppm": pd.to_numeric(frame[ppm_column], errors="coerce"),
-        }
-    )
-    out["key_stem"] = out["key"].map(lambda value: Path(value).stem.lower())
-    return out.dropna(subset=["ppm"]).reset_index(drop=True)
+    if not records:
+        raise ValueError(f"{path} yielded no usable camera rows")
+    out = pd.DataFrame.from_records(records).drop_duplicates(subset="camera_key")
+    return out.reset_index(drop=True)
 
 
-def _match_sample_id(stem: str, sample_ids: list[str]) -> str | None:
-    """Find which sample id a photo filename belongs to.
+def resolve_camera(stem: str, ppm_table: pd.DataFrame) -> pd.Series | None:
+    """Find which camera took a photo, from its filename.
 
-    Tries an exact stem match, then the longest sample id that appears in the
-    stem.  Preferring the longest match stops ``S1`` from stealing photos that
-    belong to ``S12``.
+    Filenames lead with the camera (``Samsung_A52_H030_01``), so the match is
+    on prefix.  The longest key wins, or ``Motorola_Edge`` would swallow the
+    photos belonging to ``Motorola_Edge_60_fusion``.
     """
-    lowered = stem.lower()
-    best: str | None = None
-    for sample_id in sample_ids:
-        candidate = sample_id.lower()
-        if lowered == candidate:
-            return sample_id
-        if candidate in lowered and (best is None or len(sample_id) > len(best)):
-            best = sample_id
+    key = normalise_key(stem)
+    best: pd.Series | None = None
+    for _, row in ppm_table.iterrows():
+        candidate = str(row["camera_key"])
+        if not candidate:
+            continue
+        hit = key.startswith(candidate) or candidate in key
+        if hit and (best is None or len(candidate) > len(str(best["camera_key"]))):
+            best = row
     return best
+
+
+def _match_sample_id(stem: str, normalised_ids: list[tuple[str, str]]) -> str | None:
+    """Find which sample a photo filename belongs to.
+
+    Both sides are folded through :func:`normalise_key` first, which is what
+    lets ``iPhone14_HPC_M#U00fcnster_BS6_9,0-10m`` find the sample spelled
+    ``HPC_Muenster_BS6_9_0-10m``.  The longest matching id wins so a short code
+    cannot steal photos from a longer one that contains it.
+    """
+    key = normalise_key(stem)
+    best: str | None = None
+    best_length = 0
+    for sample_id, candidate in normalised_ids:
+        if candidate and candidate in key and len(candidate) > best_length:
+            best, best_length = sample_id, len(candidate)
+    return best
+
+
+def _image_long_side(path: Path) -> float:
+    """Longest side of an image in pixels, read from the header alone."""
+    from PIL import Image
+
+    with Image.open(path) as handle:
+        return float(max(handle.size))
 
 
 def build_photo_index(
@@ -205,63 +275,77 @@ def build_photo_index(
     ppm: pd.DataFrame | None = None,
     default_ppm: float | None = None,
 ) -> pd.DataFrame:
-    """Index every photograph under ``photo_dir`` and attach its sample id and scale.
+    """Index every photograph under ``photo_dir`` with its sample id and true scale.
 
-    Returns one row per photo with ``sample_id``, ``photo_id``, ``path`` and
-    ``ppm``.  Photos whose sample id cannot be resolved are dropped, and the
-    count is reported through the ``unmatched`` attribute on the result's
-    ``attrs`` so callers can surface it rather than silently lose data.
+    The scale needs care.  ``ppm_updated.csv`` quotes pixels per millimetre at
+    a reference resolution, but most training photos were delivered downscaled:
+    a Samsung A52 frame is shipped at 1599 px across, not the 9248 px the table
+    assumes, so its real scale is 4.55 ppm rather than 26.33.  Test photos are
+    all at native resolution.  Taking the quoted number at face value would
+    therefore read training texture up to 2.5 octaves finer than it really is
+    while reading the test set correctly — a silent train/test mismatch.  The
+    correction is simply the ratio of delivered to reference resolution.
+
+    Returns one row per photo with ``sample_id``, ``photo_id``, ``path``,
+    ``ppm`` (corrected), ``camera`` and ``resolution_scale``.  Photos whose
+    sample cannot be resolved are dropped and listed in ``attrs['unmatched']``.
     """
     photo_dir = Path(photo_dir)
     if not photo_dir.is_dir():
         raise FileNotFoundError(f"photo folder {photo_dir} does not exist")
 
-    known = [str(value) for value in pd.Series(sample_ids).astype(str).unique()]
-    # Longest first so the substring search below settles ties deterministically.
-    known.sort(key=len, reverse=True)
+    normalised_ids = [
+        (str(value), normalise_key(str(value)))
+        for value in pd.Series(sample_ids).astype(str).unique()
+    ]
 
     records: list[dict[str, object]] = []
     unmatched: list[str] = []
+    no_camera: list[str] = []
     for path in sorted(photo_dir.rglob("*")):
         if not path.is_file() or path.suffix.lower() not in IMAGE_SUFFIXES:
             continue
-        sample_id = _match_sample_id(path.stem, known)
+        sample_id = _match_sample_id(path.stem, normalised_ids)
         if sample_id is None:
-            # A photo may instead sit in a folder named after its sample.
-            sample_id = _match_sample_id(path.parent.name, known)
+            sample_id = _match_sample_id(path.parent.name, normalised_ids)
         if sample_id is None:
             unmatched.append(str(path.relative_to(photo_dir)))
             continue
+
+        scale = float("nan")
+        camera = ""
+        resolution_scale = float("nan")
+        if ppm is not None:
+            row = resolve_camera(path.stem, ppm)
+            if row is None:
+                no_camera.append(path.name)
+            else:
+                camera = str(row["label"])
+                scale = float(row["ppm"])
+                reference = row["reference_long_side"]
+                if reference and np.isfinite(reference) and reference > 0:
+                    resolution_scale = _image_long_side(path) / float(reference)
+                    scale *= resolution_scale
+
         records.append(
             {
                 ID_COLUMN: sample_id,
                 "photo_id": path.stem,
                 "path": str(path),
-                "ppm": np.nan,
+                "ppm": scale,
+                "camera": camera,
+                "resolution_scale": resolution_scale,
             }
         )
 
     index = pd.DataFrame.from_records(
-        records, columns=[ID_COLUMN, "photo_id", "path", "ppm"]
+        records,
+        columns=[ID_COLUMN, "photo_id", "path", "ppm", "camera", "resolution_scale"],
     )
-
-    if ppm is not None and not index.empty:
-        lookup = dict(zip(ppm["key_stem"], ppm["ppm"]))
-        by_key = dict(zip(ppm["key"].str.lower(), ppm["ppm"]))
-        resolved = []
-        for photo_id, sample_id in zip(index["photo_id"], index[ID_COLUMN]):
-            value = lookup.get(photo_id.lower())
-            if value is None:
-                value = by_key.get(photo_id.lower())
-            if value is None:
-                # ppm may be keyed by sample or by camera rather than by photo.
-                value = lookup.get(str(sample_id).lower())
-            resolved.append(np.nan if value is None else float(value))
-        index["ppm"] = resolved
-
-    if default_ppm is not None:
+    if default_ppm is not None and not index.empty:
         index["ppm"] = index["ppm"].fillna(float(default_ppm))
 
     index.attrs["unmatched"] = unmatched
+    index.attrs["no_camera"] = no_camera
     index.attrs["photo_dir"] = str(photo_dir)
     return index.reset_index(drop=True)
