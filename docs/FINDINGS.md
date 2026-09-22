@@ -173,6 +173,64 @@ A few points is noise; the 22-point gap to the baseline and the 17-point gap
 between the two scaling choices are not. The final standing uses the other
 seven.
 
+## The leaderboard is not what it looks like
+
+The top of the public leaderboard sits near 0.92. That is a mean absolute
+error of about 0.2 percentage points per support, across every sample. No
+model predicts a sieve curve from a photograph that accurately.
+
+The host has said so himself, in the "possible Private Test-Set Leak?" thread:
+
+> I have also reviewed the private leaderboard, and those scores are within a
+> realistic range given the training data and task difficulty. My assumption is
+> therefore that the top public score reflects overfitting to the public test
+> split, whose scores are visible and can be probed through repeated
+> submissions. We are looking into how to address this.
+
+And, separately: **"The public leaderboard always uses the same 3 soils out of
+the 10 test soils."** Three fixed soils, eleven supports each, thirty-three
+numbers, five submissions a day since May. That is enough to fit the public
+split by hand without ever looking at an image, and it earns nothing on the
+private seven that decide the competition.
+
+So the public ranking should not be chased. Probing it is not attempted here:
+it is the behaviour the host is actively investigating, it produces a model
+that knows nothing, and it cannot transfer to the private split by
+construction. A legitimately earned 68 may well finish ahead of a probed 0.92.
+
+## Confirmed from the host's own answers
+
+* **"The distance from the soil to the camera is always 21 cm."** That makes
+  the scale computable from first principles: for a pinhole at fixed distance,
+  `ppm = width_px * f35 / (210 * 36)`. Every test photo carries its
+  35 mm-equivalent focal length in EXIF (all 26 mm, one lens, no zoom
+  variation), giving 13.87 ppm for the iPhone 14 and 19.64 for the iPhone 16
+  against 13.942 and 19.525 in `ppm_updated.csv` - agreement within 0.6%.
+  The camera table is right, and the resolution correction applied to the
+  training photos is what makes it usable.
+* **Test photos carry GPS and timestamps; training photos carry almost no
+  EXIF at all.** The locations are real German sites photographed in October
+  2024. Nothing in the pipeline uses this, since turning a coordinate into a
+  sieve curve would require external geotechnical records.
+* **H374 was removed and re-added with a corrected label**, and the corrected
+  version is fine: it ranks 19th of 24 by leave-one-out error despite being
+  the only Motorola Edge 60 Fusion sample. H031 is already gone from the file.
+
+## A fourth proxy, also wrong
+
+H037 and H038 are by far the hardest training samples (leave-one-out errors of
+103 and 136), and their photographs look finer than labels claiming more than
+half the mass coarser than 2 mm. Dropping them improved leave-one-out from
+37.08 to 28.21 *and* improved the independent ordering check on the test set,
+from +0.818 to +0.845. Two signals agreed, one of them measured on data the
+change could not have influenced.
+
+It scored 71.67 against 68.07. On three public soils that is inside the noise,
+so it is not proof the samples are fine - but it is one more reminder that on
+a dataset this small, every offline signal available is weaker than it looks.
+Four have now pointed the wrong way: leave-one-out on ridge, the cross-camera
+experiment, a perfect visual ordering, and this.
+
 ## What I would try next
 
 * **Stop trusting single-number proxies.** Three different ones have now been
