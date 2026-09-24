@@ -247,3 +247,43 @@ def test_blend_of_two_valid_curves_is_valid():
     assert blend_with_model(a, b, 1.0) == pytest.approx(a)
     with pytest.raises(ValueError, match=r"\[0, 1\]"):
         blend_with_model(a, b, 1.5)
+
+
+def test_warping_lands_on_the_reading():
+    """Shape comes from the model; position and width come from the photo."""
+    from soilgsd.curves import is_valid
+    from soilgsd.models import _log_d50
+    from soilgsd.visual import curve_spread, warp_to_reading
+
+    rng = np.random.default_rng(0)
+    shapes = project_valid(np.sort(rng.uniform(0, 100, size=(6, 11)), axis=1))
+    targets = np.array([0.4, 0.8, 2.0, 6.0, 18.0, 30.0])
+    widths = np.full(6, 1.3)
+
+    warped = warp_to_reading(shapes, targets, widths)
+    assert is_valid(warped).all()
+    assert 10 ** _log_d50(warped) == pytest.approx(targets, rel=0.10)
+    assert np.array([curve_spread(c) for c in warped]) == pytest.approx(widths, abs=0.25)
+
+
+def test_warping_reaches_past_the_training_range():
+    """The whole point: a pooled training curve cannot get to 30 mm, a warp can."""
+    from soilgsd.models import _log_d50
+    from soilgsd.visual import warp_to_reading
+
+    pooled = project_valid(
+        np.array([[2.0, 5, 12, 25, 45, 62, 78, 90, 96, 99, 100.0]])
+    )
+    assert 10 ** _log_d50(pooled)[0] < 1.0
+    warped = warp_to_reading(pooled, [30.0])
+    assert 10 ** _log_d50(warped)[0] == pytest.approx(30.0, rel=0.10)
+
+
+def test_warp_rejects_mismatched_inputs():
+    from soilgsd.visual import warp_to_reading
+
+    shapes = project_valid(np.sort(np.random.default_rng(1).uniform(0, 100, size=(3, 11)), axis=1))
+    with pytest.raises(ValueError, match="3 curves and 2 targets"):
+        warp_to_reading(shapes, [1.0, 2.0])
+    with pytest.raises(ValueError, match="spread_decades"):
+        warp_to_reading(shapes, [1.0, 2.0, 3.0], [1.0])

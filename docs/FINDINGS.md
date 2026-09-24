@@ -260,6 +260,55 @@ For the sands the segmentation reads 7 to 32 times the true d50, which is
 exactly right: below about 1.5 mm nothing is resolvable, so it measures the
 rare gravel inclusions and not the sand at all.
 
+## The curve family was the ceiling
+
+The readings were turned into curves by assuming a lognormal. Asking how well
+that family can represent a *real* soil curve at all - fitting each training
+curve as closely as the family allows - shows it cannot:
+
+| family | best achievable fit | under 10 EMD |
+|---|---|---|
+| lognormal, 2 parameters | 16.28 | 8 of 24 |
+| median training shape, shift only | 38.00 | 0 of 24 |
+| median training shape, shift and stretch | 10.11 | 14 of 24 |
+| **any other training curve, shifted and stretched** | **3.33** | **24 of 24** |
+
+Real gradations saturate at a true maximum particle size; a lognormal only
+approaches 100 asymptotically, and that mismatch alone costs 16 EMD before any
+prediction error. Empirical curves do not have the problem: every training
+soil can be matched to within 3.33 EMD by warping another one.
+
+(An earlier version of this table reported 40.43 for the lognormal. That came
+from an under-converged optimiser and was wrong; the correct floor is 16.28.)
+
+## Shape from the model, position from the photograph
+
+This splits the problem along the seam where each method is strong. The
+neighbour model is good at *shape* - it finds the training soils whose texture
+matches, and their curves carry a realistic gradation - and bad at *position*,
+because pooling training curves cannot reach past the training range. Reading
+a diameter off a scale bar is the reverse.
+
+Leave-one-out over the training set, with the true values standing in for a
+reading:
+
+| | LOO EMD |
+|---|---|
+| neighbour model alone | 37.08 |
+| shifted onto the right d50 | 17.19 |
+| shifted and stretched onto the right spread | 8.83 |
+| floor, if shape selection were perfect | 3.33 |
+
+The reading does not have to be precise for this to pay. Degrading it to 0.15
+decades on d50 and 20% on spread still gives 17.79, and shifting alone stays
+ahead of not shifting until the d50 error reaches about 0.5 decades, a factor
+of three.
+
+This is also why an earlier attempt at shifting failed. That version took its
+d50 from a ridge regression on the same texture features, which is heavily
+regularised toward the training range and so moved nothing where it mattered.
+The shift is only worth making when the diameter comes from outside the model.
+
 ## The leaderboard is not what it looks like
 
 The top of the public leaderboard sits near 0.92. That is a mean absolute
