@@ -223,6 +223,43 @@ Two attempts to improve on it failed, and both are informative:
   absolute-error blend is not quadratic in the weight, and three points on
   three soils cannot locate a minimum.
 
+## Measuring the grains instead of estimating them
+
+Reading d50 by eye works, so the obvious next step is to measure it: segment
+the individual stones at the photo's true scale and compute the size
+distribution directly. A watershed on the distance transform, seeded at its
+local maxima, separates touching grains; each region's equivalent circle
+diameter divides by the scale to give millimetres.
+
+On the test photographs it works, and it corroborates the readings:
+
+| soil | segmented d50 of the visible fraction | read by eye |
+|---|---|---|
+| Testfeld Lidl WHV | 18.0 mm | 17 mm |
+| Muenster | 21.7 mm | 35 mm |
+| Audorfring | 9.7 mm | 4 mm |
+
+On the training photographs it does not, and that kills it as a general
+predictor. Training frames sit at 4.55 ppm, 0.22 mm per pixel, where a fine
+soil has no visible grain boundaries at all: the surface segments as a few
+enormous bright regions while a gravelly soil fragments into many small ones.
+The measured area coarser than 2 mm therefore correlates **negatively** with
+the true mass coarser than 2 mm, r = -0.63, and the same inversion holds at
+6.3 mm and 20 mm. With no usable calibration set, the measurement cannot be
+turned into a curve.
+
+It is still worth something on the three coarse test soils, where it is an
+independent check on a number read by eye. Testfeld agrees within 6%. For the
+other two the two methods bracket the answer: Muenster's largest clasts run
+out of frame so the segmentation undercuts it, and Audorfring's counts only
+the visible gravel while ignoring the sand matrix that carries much of the
+mass, so it overshoots. The readings for those two move to the middle of each
+bracket, 30 mm and 5 mm.
+
+For the sands the segmentation reads 7 to 32 times the true d50, which is
+exactly right: below about 1.5 mm nothing is resolvable, so it measures the
+rare gravel inclusions and not the sand at all.
+
 ## The leaderboard is not what it looks like
 
 The top of the public leaderboard sits near 0.92. That is a mean absolute
