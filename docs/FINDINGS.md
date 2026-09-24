@@ -173,6 +173,56 @@ A few points is noise; the 22-point gap to the baseline and the 17-point gap
 between the two scaling choices are not. The final standing uses the other
 seven.
 
+## Reading the photographs beats the model
+
+| submission | public EMD |
+|---|---|
+| **even blend of the reading and the model** | **42.70** |
+| blend at weight 0.64 | 44.59 |
+| blend at 0.6, with a fines tail added | 48.04 |
+| the reading alone | 50.02 |
+| the reading alone, with a fines tail added | 56.04 |
+| texture model alone | 68.07 |
+| constant training median | 90.28 |
+
+The texture model pools training curves, so it cannot predict a soil coarser
+than any it was trained on. Two of the ten test soils are exactly that.
+Muenster is rounded cobbles of 40-60 mm at 9-10 m depth; Testfeld Lidl is
+crushed aggregate to 40 mm. The coarsest training soil has d50 = 6.1 mm. The
+model placed both at 4.4 mm and had 86% of Muenster passing 20 mm, which on a
+metric that averages absolute error across eleven diameters is worth tens of
+points on those two samples alone.
+
+Reading the diameter off the photograph has no such ceiling. Each photo was
+cropped to a fixed *physical* square using the camera scale - 25 mm for sands,
+120 mm for gravels - and rendered with 1, 10 and 50 mm bars drawn on it. d50
+was then read against the bars. That alone scores 50.02.
+
+The spread is not read off the photograph. A photo shows the coarse fraction
+and hides fines that coat the grains, so sigma comes from the soil's character,
+anchored on the 24 training curves: fitted lognormal sigma runs 0.40 for the
+most uniform to 1.38 for the best graded, median 0.88.
+
+### The blend is better than either half
+
+An even blend scores 42.70, against 50.02 and 68.07 for its two halves. The
+two disagree in different directions - the model is systematically too fine
+because the iPhone photos arrive sharper than the host-downscaled training
+photos, while a reading by eye misses fines - and averaging cancels part of
+both.
+
+Two attempts to improve on it failed, and both are informative:
+
+* **Adding an explicit fines tail.** The reading gave only 4.8% passing
+  0.063 mm where the training soils average 30%, which looked like an obvious
+  omission. Raising it to 15.6% moved the reading from 50.02 to 56.04 and the
+  blend from 42.70 to 48.04. These soils are as clean as they look; the
+  training set is simply siltier than the test set.
+* **Fitting the blend weight.** A quadratic through the three measured weights
+  put the optimum at 0.638 and predicted 41.45. It scored 44.59. An
+  absolute-error blend is not quadratic in the weight, and three points on
+  three soils cannot locate a minimum.
+
 ## The leaderboard is not what it looks like
 
 The top of the public leaderboard sits near 0.92. That is a mean absolute

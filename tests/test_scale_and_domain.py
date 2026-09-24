@@ -194,3 +194,56 @@ def test_default_neighbour_model_uses_the_tuned_settings():
     assert isinstance(model, NeighbourCurve)
     assert model.n_neighbours == 7
     assert model.per_domain is False
+
+
+# --------------------------------------------------------------------------
+# Curves read from the photographs.
+# --------------------------------------------------------------------------
+
+def test_visual_readings_cover_every_test_sample():
+    from soilgsd.visual import load_readings
+
+    readings, weight = load_readings()
+    assert len(readings) == 10
+    assert 0.0 <= weight <= 1.0
+    for name, entry in readings.items():
+        assert entry["d50_mm"] > 0, name
+        assert 0.3 <= entry["sigma"] <= 1.5, name
+        assert entry.get("note"), f"{name} needs a note saying what was seen"
+
+
+def test_readings_build_valid_curves_ordered_by_grain_size():
+    from soilgsd.curves import is_valid
+    from soilgsd.models import _log_d50
+    from soilgsd.visual import curves_from_readings, load_readings
+
+    readings, _ = load_readings()
+    names = list(readings)
+    curves = curves_from_readings(readings, names)
+    assert is_valid(curves).all()
+
+    recovered = 10 ** _log_d50(curves)
+    stated = np.array([readings[n]["d50_mm"] for n in names])
+    # The curve really does pass 50% at the diameter that was read off the bar.
+    assert np.allclose(recovered, stated, rtol=0.12)
+
+
+def test_reading_reaches_past_the_training_range():
+    """The point of reading by eye: the coarsest soils are outside training."""
+    from soilgsd.visual import load_readings
+
+    readings, _ = load_readings()
+    assert readings["HPC_Muenster_BS6_9_0-10m"]["d50_mm"] > 6.13
+
+
+def test_blend_of_two_valid_curves_is_valid():
+    from soilgsd.curves import is_valid, project_valid
+    from soilgsd.visual import blend_with_model
+
+    rng = np.random.default_rng(0)
+    a = project_valid(rng.uniform(0, 100, size=(6, 11)))
+    b = project_valid(rng.uniform(0, 100, size=(6, 11)))
+    assert is_valid(blend_with_model(a, b, 0.5)).all()
+    assert blend_with_model(a, b, 1.0) == pytest.approx(a)
+    with pytest.raises(ValueError, match=r"\[0, 1\]"):
+        blend_with_model(a, b, 1.5)
