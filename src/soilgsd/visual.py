@@ -83,34 +83,10 @@ def blend_with_model(
 def shift_to_d50(curves: np.ndarray, target_d50_mm) -> np.ndarray:
     """Slide each curve along log-diameter until its d50 is the measured one.
 
-    This is the piece that was missing.  The neighbour model is good at *shape*
-    - it picks the training soils whose texture matches, and their curves carry
-    a realistic gradation - but it cannot place that shape correctly, because
-    pooling training curves cannot reach past the training range.  A diameter
-    read off a scale bar places it, and sliding along log-diameter has no
-    ceiling.
-
-    Measured by leave-one-out with the true d50 standing in for a reading, the
-    neighbour model goes from 37.08 to 17.19.  With a reading accurate to 0.1
-    decades, about +/-26%, it is 18.91; at 0.3 decades, a factor of two, 26.33;
-    the two break even near 0.5 decades.  So the shift is worth making as long
-    as the diameter is known to better than a factor of about three, which
-    reading it off a bar comfortably is.
+    A thin wrapper over :func:`warp_to_reading` with no stretching, kept
+    because shifting alone is the more conservative of the two adjustments.
     """
-    from .models import _log_d50
-
-    curves = np.atleast_2d(np.asarray(curves, dtype=float))
-    targets = np.log10(np.atleast_1d(np.asarray(target_d50_mm, dtype=float)))
-    if len(targets) != len(curves):
-        raise ValueError(f"got {len(curves)} curves and {len(targets)} targets")
-
-    current = _log_d50(curves)
-    out = np.empty_like(curves)
-    for row, (curve, have, want) in enumerate(zip(curves, current, targets)):
-        out[row] = np.interp(
-            LOG_SUPPORTS, LOG_SUPPORTS + (want - have), curve, left=0.0, right=100.0
-        )
-    return project_valid(out)
+    return warp_to_reading(curves, target_d50_mm, None)
 
 
 def curve_spread(curve: np.ndarray) -> float:
@@ -168,8 +144,24 @@ def warp_to_reading(
             current = curve_spread(curve)
             if current > 1e-6:
                 stretch = float(widths[row]) / current
-        # Stretch about the curve's own median, then slide that median onto the
-        # reading, so the two adjustments do not fight each other.
-        source = (LOG_SUPPORTS - centre) * stretch + centre + (want - centre)
-        out[row] = np.interp(LOG_SUPPORTS, source, curve, left=0.0, right=100.0)
+
+        def place(shift: float) -> np.ndarray:
+            # Stretch about the curve's own median, then slide it, so the two
+            # adjustments do not fight each other.
+            source = (LOG_SUPPORTS - centre) * stretch + centre + shift
+            return np.interp(LOG_SUPPORTS, source, curve, left=0.0, right=100.0)
+
+        # A target near either end of the support range pushes part of the
+        # curve outside it, where interpolation clamps to 0 or 100.  That
+        # truncation drags the median back toward the centre, so solve for the
+        # shift whose *result* has the requested d50 rather than assuming it.
+        shift = want - centre
+        for _ in range(12):
+            placed = place(shift)
+            achieved = _log_d50(placed[None, :])[0]
+            error = want - achieved
+            if abs(error) < 1e-4:
+                break
+            shift += error
+        out[row] = place(shift)
     return project_valid(out)
