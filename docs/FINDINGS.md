@@ -173,6 +173,44 @@ A few points is noise; the 22-point gap to the baseline and the 17-point gap
 between the two scaling choices are not. The final standing uses the other
 seven.
 
+## Scoreboard
+
+Public leaderboard, 2026-09-25. Best is **42.14**, rank about 66 of 322.
+
+| submission | public EMD |
+|---|---|
+| **reading and model blended, weight 0.45** | **42.14** |
+| same, weight 0.40 | 42.59 |
+| same, weight 0.50 | 42.70 |
+| same, weight 0.64 | 44.59 |
+| reading alone | 50.02 |
+| model shape warped onto the reading | 53.45 |
+| model shape shifted onto the reading | 62.65 |
+| texture model alone | 68.07 |
+| constant training median | 90.28 |
+
+The blend weight is now pinned: 0.45 is the floor of a flat minimum between
+0.40 and 0.50, and the curve rises either side of it.
+
+### The warp did not survive contact
+
+Leave-one-out said warping the model's shape onto a measured d50 and spread
+should reach about 18, against 37 for the model alone. It scored 53.45, and
+shifting without stretching scored 62.65. That is the sixth offline signal to
+point the wrong way.
+
+Two things inside the failure are still worth keeping. The readings taken
+straight off the scale bars beat the ones "refined" using the segmentation,
+53.45 against 57.11, so the segmentation's bracketing of Muenster and
+Audorfring made those two numbers worse rather than better. And stretching to
+the read spread beat shifting alone by 9 EMD, so the spread estimate carries
+real information even though the whole is worse than the blend.
+
+The pattern across every attempt is consistent: any single source of truth -
+the model alone, the reading alone, the reading imposed on the model - loses
+to averaging two of them. The blend works because its two halves are wrong in
+different directions, and anything that makes one half dominate gives that up.
+
 ## Reading the photographs beats the model
 
 | submission | public EMD |
