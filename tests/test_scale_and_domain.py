@@ -287,3 +287,51 @@ def test_warp_rejects_mismatched_inputs():
         warp_to_reading(shapes, [1.0, 2.0])
     with pytest.raises(ValueError, match="spread_decades"):
         warp_to_reading(shapes, [1.0, 2.0, 3.0], [1.0])
+
+
+def test_template_curves_land_on_the_reading_and_stay_valid():
+    from soilgsd.curves import is_valid
+    from soilgsd.models import _log_d50
+    from soilgsd.visual import curves_from_template, load_readings
+
+    readings, _ = load_readings()
+    names = list(readings)
+    # stand-in training curves spanning fine to coarse
+    grid = np.linspace(-2.7, 2.3, 11)
+    training = project_valid(
+        np.array([100 / (1 + np.exp(-(grid - c) * 2.0)) for c in (-2.0, -0.5, 0.5, 1.4)])
+    )
+    curves = curves_from_template(readings, names, training)
+
+    assert is_valid(curves).all()
+    stated = np.array([readings[n]["d50_mm"] for n in names])
+    assert 10 ** _log_d50(curves) == pytest.approx(stated, rel=0.12)
+
+
+def test_template_beats_a_lognormal_on_the_real_curves():
+    """Given only a d50 and a spread, an empirical template reproduces a real
+    soil curve better than a lognormal does."""
+    from scipy.stats import norm
+
+    from soilgsd.constants import LOG_SUPPORTS, TARGET_COLUMNS
+    from soilgsd.data import load_labels
+    from soilgsd.metric import weighted_emd
+    from soilgsd.models import _log_d50
+    from soilgsd.visual import curve_spread, warp_to_reading
+
+    try:
+        truth = load_labels("data/raw/Training_labels_updated.csv")[list(TARGET_COLUMNS)].to_numpy()
+    except FileNotFoundError:
+        pytest.skip("competition data not present")
+
+    centres = _log_d50(truth)
+    spreads = np.array([curve_spread(c) for c in truth])
+
+    lognormal, template = [], []
+    for i, (centre, spread) in enumerate(zip(centres, spreads)):
+        lognormal.append(project_valid(100 * norm.cdf((LOG_SUPPORTS - centre) / max(spread / 2, 0.05))))
+        others = [j for j in range(len(truth)) if j != i]
+        pick = others[int(np.argmin(np.abs(centres[others] - centre)))]
+        template.append(warp_to_reading(truth[pick][None, :], [10**centre], [spread])[0])
+
+    assert weighted_emd(truth, np.array(template)) < weighted_emd(truth, np.array(lognormal))
