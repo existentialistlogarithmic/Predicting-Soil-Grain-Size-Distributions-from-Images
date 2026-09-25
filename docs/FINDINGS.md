@@ -347,6 +347,25 @@ d50 from a ridge regression on the same texture features, which is heavily
 regularised toward the training range and so moved nothing where it mattered.
 The shift is only worth making when the diameter comes from outside the model.
 
+## The scale is verified against a ruler in the frame
+
+One of the five Muenster photographs has a wooden ruler lying on the stones,
+centimetre marks and all. That is a physical reference inside the data, and it
+checks the one number the whole pipeline rests on.
+
+Sampling rows across the ruler's tick band and taking the dominant spatial
+frequency gives a period of **14.89 px per millimetre**, stable across every
+row from 0.770H to 0.790H and strongly periodic there. `ppm_updated.csv` gives
+13.942 px/mm for the iPhone 14. The ratio is 1.068, **+0.029 decades**, and the
+ruler is resting on top of the stones rather than on the soil surface, so it
+sits nearer the camera and should read slightly large.
+
+The camera table is therefore right to within about 7%, which is a twentieth of
+the uncertainty in reading a d50 off a scale bar. Scale error is ruled out as a
+source of what is left. It also confirms, independently of the earlier
+first-principles check, that the resolution correction applied to the training
+photographs is the right one.
+
 ## The leaderboard is not what it looks like
 
 The top of the public leaderboard sits near 0.92. That is a mean absolute
