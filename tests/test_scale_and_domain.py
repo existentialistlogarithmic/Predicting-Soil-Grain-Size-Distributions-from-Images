@@ -335,3 +335,17 @@ def test_template_beats_a_lognormal_on_the_real_curves():
         template.append(warp_to_reading(truth[pick][None, :], [10**centre], [spread])[0])
 
     assert weighted_emd(truth, np.array(template)) < weighted_emd(truth, np.array(lognormal))
+
+
+def test_adaptive_weight_only_moves_past_the_training_range():
+    from soilgsd.visual import adaptive_blend_weight
+
+    grid = np.linspace(-2.7, 2.3, 11)
+    training = project_valid(np.array([100 / (1 + np.exp(-(grid - c) * 2.0)) for c in (-2.0, 0.0, 0.79)]))
+
+    w = adaptive_blend_weight([0.5, 6.0, 17.0, 35.0], training)
+    assert w[0] == pytest.approx(0.45)          # well inside -> unchanged
+    assert w[1] == pytest.approx(0.45)          # at the edge -> unchanged
+    assert 0.45 < w[2] < 0.95                   # past it -> ramping
+    assert w[3] == pytest.approx(0.95)          # far past -> capped, not 1.0
+    assert (w <= 0.95).all()

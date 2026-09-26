@@ -204,3 +204,35 @@ def curves_from_template(
             )[0]
         )
     return project_valid(np.array(out))
+
+
+def adaptive_blend_weight(
+    d50_mm,
+    training_curves: np.ndarray,
+    *,
+    base: float = 0.45,
+    ceiling: float = 0.95,
+    ramp_decades: float = 0.5,
+) -> np.ndarray:
+    """Give the reading more weight where the model provably cannot compete.
+
+    The neighbour model predicts by pooling training curves, so it cannot place
+    a soil coarser than the coarsest it has seen.  Two of the ten test soils are
+    beyond that line - Muenster's reading sits 0.76 decades past the training
+    maximum of 6.13 mm and Testfeld's 0.44 - and on those the model is not
+    merely inaccurate, it is incapable.  A fixed weight nonetheless hands it
+    more than half the vote, which drags both toward a coarseness the training
+    set happens to stop at.
+
+    Inside the training range the weight stays at the measured optimum, since
+    there the model is a genuine second opinion and the blend needs its
+    disagreement.  Past the range it ramps up over ``ramp_decades``, reaching
+    ``ceiling`` rather than 1.0 so the model still contributes the fines that a
+    reading by eye cannot see.
+    """
+    from .models import _log_d50
+
+    training_max = float(_log_d50(np.asarray(training_curves, dtype=float)).max())
+    excess = np.maximum(0.0, np.log10(np.atleast_1d(np.asarray(d50_mm, float))) - training_max)
+    fraction = np.minimum(1.0, excess / max(ramp_decades, 1e-6))
+    return np.clip(base + (ceiling - base) * fraction, min(base, ceiling), max(base, ceiling))
