@@ -366,6 +366,47 @@ source of what is left. It also confirms, independently of the earlier
 first-principles check, that the resolution correction applied to the training
 photographs is the right one.
 
+## Narrowing the read spread, and why the blend's halves must disagree
+
+Scaling every read sigma by 0.8 - narrowing each curve without touching its
+d50 - took the blend from 42.14 to **39.85**, clearing the cluster of about
+twenty teams on 40.22 and 40.33 and moving the rank from roughly 69 to 46.
+Pushing the two coarse readings further, 45 mm at Muenster and 20 mm at
+Testfeld, also beat the old best on its own at 41.82.
+
+The same round settled what the blend is actually doing. A reading whose curve
+is built from the nearest-d50 training soil reproduces the training curves far
+better than a lognormal, 8.35 EMD against 14.30, and alone on the leaderboard
+it is indeed better, 49.75 against 50.02. **Blended it is worse**: 43.82
+against 42.14.
+
+It is built from training curves, and so is the neighbour model, so the two
+halves fail together. The lognormal is the weaker predictor and the more
+independent one. What the blend consumes is disagreement, not accuracy.
+
+Measuring that disagreement directly says there are only two predictors here,
+not four:
+
+| pair | EMD apart |
+|---|---|
+| reading vs model | 102.1 |
+| reading vs template | 9.9 |
+| reading vs warp | 16.7 |
+| model vs template | 96.7 |
+| model vs warp | 95.9 |
+
+The reading, the template and the warp sit within 17 EMD of each other because
+all three are positioned by the same numbers read off the same photographs.
+Only the model is independent of them.
+
+That also rules out an idea worth stating, because the theory behind it is
+sound and it still does not apply. The metric is an absolute error, so a
+pointwise median of three predictors is the optimal combination rather than a
+mean of two, and in simulation the median beat the pair on every seed, 17.31
+against 23.27. With two near-identical members it degenerates instead: they
+outvote the model and the median collapses onto the reading alone. A median
+needs three mutually independent sources and this problem supplies two.
+
 ## The leaderboard is not what it looks like
 
 The top of the public leaderboard sits near 0.92. That is a mean absolute
