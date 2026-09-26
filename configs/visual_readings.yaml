@@ -15,8 +15,15 @@
 # 50.02 -> 56.04, blended 42.70 -> 48.04), so these soils really are as clean
 # as they look. See docs/FINDINGS.md.
 
-blend_weight: 0.5   # weight on this reading; the rest is the texture model.
-                    # 0.5 scored 42.70; 0.64 scored 44.59; 1.0 scored 50.02.
+blend_weight: 0.45  # weight on this reading; the rest is the texture model.
+                    # 0.45 scored 42.14, 0.50 42.70, 0.64 44.59, 1.0 50.02.
+
+# Every sigma below is multiplied by this before the curve is built. Narrowing
+# the spread was the single largest late gain: 0.8 took the blend from 42.14 to
+# 39.84 and cleared the cluster of teams sitting just above 40. The readings
+# are left at their original values so the multiplier stays visible as the
+# tuned quantity rather than being baked into ten numbers.
+sigma_scale: 0.8
 
 readings:
   HPC_Muenster_BS6_9_0-10m: {d50_mm: 35.0,  sigma: 0.70, note: "rounded cobbles 40-60 mm in gravel, washed, few fines"}
